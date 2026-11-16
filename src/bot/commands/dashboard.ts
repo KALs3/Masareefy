@@ -9,7 +9,8 @@ export async function dashboardCommand(ctx: CommandContext<Context>) {
   const env = getEnv();
   const webAppUrl =
     env.MINI_APP_URL ||
-    (env.WEBHOOK_URL ? env.WEBHOOK_URL.replace("/api/webhook", "") : "");
+    (env.WEBHOOK_URL ? env.WEBHOOK_URL.replace("/api/webhook", "") : "") ||
+    "https://masareefy-chi.vercel.app";
 
   const keyboard = new InlineKeyboard();
 
