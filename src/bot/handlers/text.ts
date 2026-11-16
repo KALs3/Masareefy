@@ -4,6 +4,7 @@ import { db } from "../../db/client";
 import { categories, users } from "../../db/schema";
 import { eq } from "drizzle-orm";
 import { saveAndReplyExpenses } from "../utils/expense-logger";
+import { checkRateLimit } from "../utils/rate-limiter";
 
 /**
  * Handles incoming text messages:
@@ -28,6 +29,14 @@ export async function handleTextMessage(ctx: Context) {
 
   if (!user) {
     return ctx.reply("👋 Please run /start first to set up your account!");
+  }
+
+  // Rate limit protection
+  const rateCheck = await checkRateLimit(userId);
+  if (!rateCheck.allowed) {
+    return ctx.reply(rateCheck.reason || "Rate limit reached.", {
+      parse_mode: "Markdown",
+    });
   }
 
   // Fetch user's categories for the AI prompt
