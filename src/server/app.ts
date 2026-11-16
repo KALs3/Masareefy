@@ -14,10 +14,48 @@ app.get("/health", (c) =>
 );
 
 // ─── Telegram Webhook ─────────────────────────────────────────────────────────
+const bot = createBot();
+
+// Pre-create the grammY webhook handler with a 55s timeout and 'return' policy
+// This prevents grammY from prematurely timing out at 10s and prevents Telegram retries
+const handleUpdate = webhookCallback(bot, "hono", "return", 55_000);
+
+// In-memory deduplication cache for Telegram update_id
+const seenUpdateIds = new Map<number, number>();
+
 app.post("/webhook", async (c) => {
-  const bot = createBot();
-  const handler = webhookCallback(bot, "hono");
-  return handler(c);
+  // 1. Inspect update_id to instantly drop duplicate Telegram retries
+  try {
+    const rawBody = await c.req.raw.clone().json();
+    const updateId = rawBody?.update_id;
+
+    if (updateId) {
+      const now = Date.now();
+      const lastSeen = seenUpdateIds.get(updateId);
+
+      if (lastSeen && now - lastSeen < 120_000) {
+        console.log(`[Dedupe] Dropping duplicate Telegram update_id: ${updateId}`);
+        // Return 200 OK immediately so Telegram stops retrying
+        return c.text("OK", 200);
+      }
+
+      seenUpdateIds.set(updateId, now);
+
+      // Clean up stale IDs periodically
+      if (seenUpdateIds.size > 500) {
+        for (const [id, timestamp] of seenUpdateIds.entries()) {
+          if (now - timestamp > 120_000) {
+            seenUpdateIds.delete(id);
+          }
+        }
+      }
+    }
+  } catch {
+    // If body clone fails, proceed to handler normally
+  }
+
+  // 2. Delegate to grammY
+  return handleUpdate(c);
 });
 
 // ─── Mini App REST API ────────────────────────────────────────────────────────

@@ -36,6 +36,26 @@ export async function saveAndReplyExpenses(
       (c) => c.name.toLowerCase() === exp.category.toLowerCase()
     );
 
+    // Deduplication guard: prevent identical expense inserts within 20 seconds (fixes Telegram webhook retries)
+    const twentySecondsAgo = new Date(Date.now() - 20 * 1000);
+    const [recentDuplicate] = await db
+      .select({ id: expenses.id })
+      .from(expenses)
+      .where(
+        and(
+          eq(expenses.userId, userId),
+          eq(expenses.amount, exp.amount.toString()),
+          eq(expenses.description, exp.description || "Expense"),
+          gte(expenses.createdAt, twentySecondsAgo)
+        )
+      )
+      .limit(1);
+
+    if (recentDuplicate) {
+      console.log(`[Dedupe] Skipped duplicate webhook insert for user ${userId}: ${exp.description}`);
+      continue;
+    }
+
     const [saved] = await db
       .insert(expenses)
       .values({
