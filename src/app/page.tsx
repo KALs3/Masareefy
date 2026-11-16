@@ -1,15 +1,44 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { useTelegram } from "@/hooks/use-telegram";
 import { Navbar } from "@/components/navbar";
 import { KpiCards } from "@/components/kpi-cards";
-import { CategoryDonutChart } from "@/components/category-donut-chart";
-import { SpendingTrendChart } from "@/components/spending-trend-chart";
 import { AddExpenseModal } from "@/components/add-expense-modal";
 import { BudgetSettingsModal } from "@/components/budget-settings-modal";
 import { Plus, ArrowRight, Loader2, Sparkles } from "lucide-react";
 import Link from "next/link";
+
+const CategoryDonutChart = dynamic(
+  () =>
+    import("@/components/category-donut-chart").then(
+      (mod) => mod.CategoryDonutChart
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-64 p-4 rounded-2xl bg-slate-900/60 border border-slate-800/80 flex items-center justify-center text-slate-500 text-xs">
+        Loading chart...
+      </div>
+    ),
+  }
+);
+
+const SpendingTrendChart = dynamic(
+  () =>
+    import("@/components/spending-trend-chart").then(
+      (mod) => mod.SpendingTrendChart
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-64 p-4 rounded-2xl bg-slate-900/60 border border-slate-800/80 flex items-center justify-center text-slate-500 text-xs">
+        Loading chart...
+      </div>
+    ),
+  }
+);
 
 interface DashboardData {
   currency: string;
