@@ -5,6 +5,7 @@ const envSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(1, "TELEGRAM_BOT_TOKEN is required"),
   GEMINI_API_KEY: z.string().min(1, "GEMINI_API_KEY is required"),
   WEBHOOK_URL: z.string().url().optional(),
+  MINI_APP_URL: z.string().url().optional(),
 });
 
 // Lazy validation — only validate when accessed, not at import time.

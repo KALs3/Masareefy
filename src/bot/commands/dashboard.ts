@@ -7,14 +7,19 @@ import { getEnv } from "../../lib/env";
  */
 export async function dashboardCommand(ctx: CommandContext<Context>) {
   const env = getEnv();
-  const webAppUrl = env.WEBHOOK_URL?.replace("/api/webhook", "") || "https://t.me/Masareefyy_bot";
+  const webAppUrl =
+    env.MINI_APP_URL ||
+    (env.WEBHOOK_URL ? env.WEBHOOK_URL.replace("/api/webhook", "") : "");
 
   const keyboard = new InlineKeyboard();
 
-  if (env.WEBHOOK_URL) {
+  if (webAppUrl && webAppUrl.startsWith("https://")) {
     keyboard.webApp("📈 Open Mini App Dashboard", webAppUrl);
   } else {
-    keyboard.url("📈 Web Dashboard", "https://t.me/Masareefyy_bot");
+    keyboard.url(
+      "📈 Open Bot on Telegram",
+      "https://t.me/Masareefyy_bot"
+    );
   }
 
   await ctx.reply(

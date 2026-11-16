@@ -104,16 +104,14 @@ expensesRouter.post("/", async (c) => {
     return c.json({ error: "Invalid input", details: parsed.error.format() }, 400);
   }
 
-  // Get user's default currency if not provided
-  let currency = parsed.data.currency;
-  if (!currency) {
-    const user = await db
-      .select({ currency: users.currency })
-      .from(users)
-      .where(eq(users.telegramId, userId))
-      .then((r) => r[0]);
-    currency = user?.currency || "EGP";
-  }
+  // Get user details for currency & budget check
+  const user = await db
+    .select()
+    .from(users)
+    .where(eq(users.telegramId, userId))
+    .then((r) => r[0]);
+
+  const currency = parsed.data.currency || user?.currency || "EGP";
 
   const [created] = await db
     .insert(expenses)
@@ -128,7 +126,46 @@ expensesRouter.post("/", async (c) => {
     })
     .returning();
 
-  return c.json({ expense: created }, 201);
+  // Check budget status
+  let budgetAlert: { type: "warning" | "exceeded"; message: string } | null = null;
+  const monthlyBudget = Number(user?.monthlyBudget || 0);
+
+  if (monthlyBudget > 0) {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const firstDay = `${year}-${month}-01`;
+    const lastDay = new Date(year, now.getMonth() + 1, 0)
+      .toISOString()
+      .split("T")[0];
+
+    const monthTotal = await db
+      .select({ total: sql<string>`COALESCE(SUM(${expenses.amount}), 0)` })
+      .from(expenses)
+      .where(
+        and(
+          eq(expenses.userId, userId),
+          gte(expenses.expenseDate, firstDay),
+          lte(expenses.expenseDate, lastDay)
+        )
+      )
+      .then((r) => Number(r[0]?.total || 0));
+
+    const pct = (monthTotal / monthlyBudget) * 100;
+    if (pct >= 100) {
+      budgetAlert = {
+        type: "exceeded",
+        message: `You've exceeded your monthly budget (${pct.toFixed(0)}%) by ${(monthTotal - monthlyBudget).toFixed(2)} ${user?.currency}!`,
+      };
+    } else if (pct >= 80) {
+      budgetAlert = {
+        type: "warning",
+        message: `You've used ${pct.toFixed(0)}% of your monthly budget. ${(monthlyBudget - monthTotal).toFixed(2)} ${user?.currency} remaining.`,
+      };
+    }
+  }
+
+  return c.json({ expense: created, budgetAlert }, 201);
 });
 
 // ─── PATCH /api/expenses/:id (Update an expense) ──────────────────────────────

@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "bot:dev": "tsx --env-file=.env.local src/bot/dev.ts",
+    "bot:commands": "tsx --env-file=.env.local src/bot/setup-commands.ts",
+    "webhook:set": "tsx --env-file=.env.local src/bot/set-webhook.ts",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
