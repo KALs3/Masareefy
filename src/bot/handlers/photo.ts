@@ -3,9 +3,9 @@ import { extractExpenseFromImage } from "../../services/ai";
 import { db } from "../../db/client";
 import { categories, users } from "../../db/schema";
 import { eq } from "drizzle-orm";
-import { getEnv } from "../../lib/env";
 import { saveAndReplyExpenses } from "../utils/expense-logger";
 import { checkRateLimit } from "../utils/rate-limiter";
+import { downloadTelegramFile } from "../utils/file-downloader";
 
 /**
  * Handles incoming receipt photos, bills, and payment transfer screenshots:
@@ -51,37 +51,63 @@ export async function handlePhotoMessage(ctx: Context) {
 
   try {
     // Get the highest resolution photo (last element in array)
-    const file = await ctx.getFile();
+    const bestPhoto = photos[photos.length - 1];
+    const file = await ctx.api.getFile(bestPhoto.file_id);
+
     if (!file.file_path) {
-      return ctx.reply("⚠️ Could not download receipt image. Please try again.");
+      console.error(`[Photo] getFile returned no file_path for user ${userId}, file_id: ${bestPhoto.file_id}`);
+      return ctx.reply("⚠️ Could not download the image from Telegram. Please try again.");
     }
 
-    const token = getEnv().TELEGRAM_BOT_TOKEN;
-    const downloadUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
-    const response = await fetch(downloadUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch photo from Telegram: ${response.statusText}`);
+    console.log(`[Photo] Downloading file: ${file.file_path} (${bestPhoto.width}x${bestPhoto.height}, ~${bestPhoto.file_size || "?"}B) for user ${userId}`);
+
+    const imageBuffer = await downloadTelegramFile(file.file_path);
+
+    if (imageBuffer.length === 0) {
+      console.error(`[Photo] Downloaded empty buffer for user ${userId}`);
+      return ctx.reply("⚠️ The downloaded image was empty. Please try sending the photo again.");
     }
 
-    const arrayBuffer = await response.arrayBuffer();
-    const imageBuffer = Buffer.from(arrayBuffer);
+    console.log(`[Photo] Downloaded ${imageBuffer.length} bytes, sending to Gemini...`);
 
-    // Telegram photos are JPEG format
+    // Determine MIME type — Telegram photos are JPEG; documents may vary
     const mimeType = "image/jpeg";
+
+    // Extract caption if the user added one (e.g., "grocery receipt 150 EGP")
+    const caption = ctx.message?.caption || undefined;
 
     const result = await extractExpenseFromImage(
       imageBuffer,
       mimeType,
       user.currency ?? "EGP",
       categoryNames,
-      new Date().toISOString().split("T")[0]
+      new Date().toISOString().split("T")[0],
+      caption
     );
 
     await saveAndReplyExpenses(ctx, userId, user, userCategories, result, "photo");
   } catch (error) {
-    console.error("Photo expense error:", error);
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error(`[Photo] Error for user ${userId}:`, errMsg);
+
+    // Give the user a more specific error message
+    if (errMsg.includes("fetch") || errMsg.includes("network") || errMsg.includes("ECONNRESET")) {
+      return ctx.reply(
+        "⚠️ Network error while downloading the image. Please try sending it again in a few seconds."
+      );
+    }
+
+    if (errMsg.includes("too large") || errMsg.includes("exceeds") || errMsg.includes("size")) {
+      return ctx.reply(
+        "⚠️ That image is too large. Please try sending a smaller or more compressed photo."
+      );
+    }
+
     return ctx.reply(
-      "⚠️ Sorry, I had trouble scanning that receipt. Please ensure the receipt is clear and well-lit, or type it manually!"
+      "⚠️ Sorry, I had trouble scanning that receipt. Tips:\n" +
+        "• Make sure the receipt is clear and well-lit\n" +
+        "• Try cropping to show just the receipt\n" +
+        "• You can also type the expense manually (e.g., `150 coffee`)"
     );
   }
 }

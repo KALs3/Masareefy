@@ -98,6 +98,78 @@ Rules:
 }
 
 /**
+ * Safely parse the Gemini response text into an ExtractionResult.
+ * Handles null/undefined responses, malformed JSON, and missing fields.
+ */
+function parseGeminiResponse(responseText: string | null | undefined): ExtractionResult {
+  if (!responseText || responseText.trim().length === 0) {
+    console.error("[AI] Gemini returned empty/null response text");
+    return {
+      is_expense: false,
+      expenses: [],
+      reply_message: "I couldn't process that. Could you try again or type the expense manually?",
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(responseText);
+
+    // Validate essential fields exist
+    return {
+      is_expense: Boolean(parsed.is_expense),
+      expenses: Array.isArray(parsed.expenses)
+        ? parsed.expenses.filter(
+            (e: Record<string, unknown>) =>
+              typeof e.amount === "number" && e.amount > 0
+          )
+        : [],
+      reply_message:
+        parsed.reply_message ||
+        (parsed.is_expense
+          ? "Expense logged!"
+          : "I couldn't find expense details in that."),
+    };
+  } catch (parseError) {
+    console.error("[AI] Failed to parse Gemini JSON response:", parseError, "Raw:", responseText);
+    return {
+      is_expense: false,
+      expenses: [],
+      reply_message: "I had trouble understanding the response. Please try sending the expense as text.",
+    };
+  }
+}
+
+/**
+ * Call Gemini with retry logic for transient failures.
+ * Retries once on network/server errors with a brief delay.
+ */
+async function callGeminiWithRetry(
+  genai: GoogleGenAI,
+  params: Parameters<GoogleGenAI["models"]["generateContent"]>[0],
+  label: string,
+  maxRetries: number = 1
+): Promise<string | null> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await genai.models.generateContent(params);
+      return response.text ?? null;
+    } catch (error) {
+      const isLastAttempt = attempt === maxRetries;
+      console.error(
+        `[AI] Gemini ${label} attempt ${attempt + 1}/${maxRetries + 1} failed:`,
+        error instanceof Error ? error.message : error
+      );
+
+      if (isLastAttempt) throw error;
+
+      // Brief delay before retry (1 second)
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+  return null;
+}
+
+/**
  * Extract expense details from a natural language text message using Gemini.
  */
 export async function extractExpenseFromText(
@@ -109,17 +181,21 @@ export async function extractExpenseFromText(
   const genai = getGenAI();
   const systemPrompt = buildSystemPrompt(userCurrency, categoryNames, currentDate, "text");
 
-  const response = await genai.models.generateContent({
-    model: "gemini-3.5-flash",
-    contents: text,
-    config: {
-      systemInstruction: systemPrompt,
-      responseMimeType: "application/json",
-      responseSchema: expenseExtractionSchema,
+  const responseText = await callGeminiWithRetry(
+    genai,
+    {
+      model: "gemini-3.5-flash",
+      contents: text,
+      config: {
+        systemInstruction: systemPrompt,
+        responseMimeType: "application/json",
+        responseSchema: expenseExtractionSchema,
+      },
     },
-  });
+    "text"
+  );
 
-  return JSON.parse(response.text!) as ExtractionResult;
+  return parseGeminiResponse(responseText);
 }
 
 /**
@@ -135,71 +211,127 @@ export async function extractExpenseFromAudio(
   const genai = getGenAI();
   const systemPrompt = buildSystemPrompt(userCurrency, categoryNames, currentDate, "voice");
 
-  const response = await genai.models.generateContent({
-    model: "gemini-3.5-flash",
-    contents: [
-      {
-        role: "user",
-        parts: [
-          {
-            inlineData: {
-              mimeType: mimeType || "audio/ogg",
-              data: audioBuffer.toString("base64"),
-            },
-          },
-          {
-            text: "Extract all expense information from this spoken voice message.",
-          },
-        ],
-      },
-    ],
-    config: {
-      systemInstruction: systemPrompt,
-      responseMimeType: "application/json",
-      responseSchema: expenseExtractionSchema,
-    },
-  });
+  // Telegram voice notes are always Opus-in-OGG containers.
+  // Normalize the MIME type to what Gemini reliably accepts.
+  const normalizedMime = normalizeMimeType(mimeType, "audio/ogg");
 
-  return JSON.parse(response.text!) as ExtractionResult;
+  const responseText = await callGeminiWithRetry(
+    genai,
+    {
+      model: "gemini-3.5-flash",
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              inlineData: {
+                mimeType: normalizedMime,
+                data: audioBuffer.toString("base64"),
+              },
+            },
+            {
+              text: "Listen to this voice message and extract all expense information mentioned. The user may speak in Arabic, Egyptian dialect, Franco-Arabic, or English.",
+            },
+          ],
+        },
+      ],
+      config: {
+        systemInstruction: systemPrompt,
+        responseMimeType: "application/json",
+        responseSchema: expenseExtractionSchema,
+      },
+    },
+    "audio"
+  );
+
+  return parseGeminiResponse(responseText);
 }
 
 /**
  * Extract expense details from an image buffer (e.g., paper receipt, bill, InstaPay transfer screenshot).
+ * Optionally accepts a user caption for additional context.
  */
 export async function extractExpenseFromImage(
   imageBuffer: Buffer,
   mimeType: string,
   userCurrency: string,
   categoryNames: string[],
-  currentDate: string
+  currentDate: string,
+  caption?: string
 ): Promise<ExtractionResult> {
   const genai = getGenAI();
   const systemPrompt = buildSystemPrompt(userCurrency, categoryNames, currentDate, "receipt/image");
 
-  const response = await genai.models.generateContent({
-    model: "gemini-3.5-flash",
-    contents: [
-      {
-        role: "user",
-        parts: [
-          {
-            inlineData: {
-              mimeType: mimeType || "image/jpeg",
-              data: imageBuffer.toString("base64"),
-            },
-          },
-          {
-            text: "Extract the expense details (merchant/payee, total amount, currency, date, category) from this receipt, invoice, or payment screenshot.",
-          },
-        ],
-      },
-    ],
-    config: {
-      systemInstruction: systemPrompt,
-      responseMimeType: "application/json",
-      responseSchema: expenseExtractionSchema,
-    },
-  });
+  const normalizedMime = normalizeMimeType(mimeType, "image/jpeg");
 
-  return JSON.parse(response.text!) as ExtractionResult;
+  // Build a contextual prompt — include caption if the user provided one
+  const userPrompt = caption
+    ? `The user sent this image with the caption: "${caption}". Extract the expense details (merchant/payee, total amount, currency, date, category) from this receipt, invoice, or payment screenshot. Use the caption as extra context.`
+    : "Extract the expense details (merchant/payee, total amount, currency, date, category) from this receipt, invoice, or payment screenshot.";
+
+  const responseText = await callGeminiWithRetry(
+    genai,
+    {
+      model: "gemini-3.5-flash",
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              inlineData: {
+                mimeType: normalizedMime,
+                data: imageBuffer.toString("base64"),
+              },
+            },
+            {
+              text: userPrompt,
+            },
+          ],
+        },
+      ],
+      config: {
+        systemInstruction: systemPrompt,
+        responseMimeType: "application/json",
+        responseSchema: expenseExtractionSchema,
+      },
+    },
+    "image"
+  );
+
+  return parseGeminiResponse(responseText);
+}
+
+/**
+ * Normalize MIME types to ensure Gemini receives a valid, known type.
+ * Handles edge cases like undefined, empty, or non-standard MIME strings from Telegram.
+ */
+function normalizeMimeType(raw: string | undefined | null, fallback: string): string {
+  if (!raw || raw.trim().length === 0) return fallback;
+
+  const cleaned = raw.toLowerCase().trim().split(";")[0].trim(); // Strip codec params like "; codecs=opus"
+
+  // Map known variants to Gemini-accepted types
+  const mimeMap: Record<string, string> = {
+    "audio/ogg": "audio/ogg",
+    "audio/opus": "audio/ogg",
+    "audio/oga": "audio/ogg",
+    "audio/x-ogg": "audio/ogg",
+    "audio/mp3": "audio/mp3",
+    "audio/mpeg": "audio/mp3",
+    "audio/mp4": "audio/mp3",
+    "audio/m4a": "audio/mp3",
+    "audio/wav": "audio/wav",
+    "audio/x-wav": "audio/wav",
+    "audio/webm": "audio/webm",
+    "audio/flac": "audio/flac",
+    "image/jpeg": "image/jpeg",
+    "image/jpg": "image/jpeg",
+    "image/png": "image/png",
+    "image/webp": "image/webp",
+    "image/gif": "image/gif",
+    "image/heic": "image/heic",
+    "image/heif": "image/heif",
+  };
+
+  return mimeMap[cleaned] || fallback;
 }
