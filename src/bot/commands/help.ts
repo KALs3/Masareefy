@@ -1,7 +1,7 @@
 import type { CommandContext, Context } from "grammy";
 
 /**
- * /help command — lists all available bot commands and input methods in Arabic and English.
+ * /help command — lists all available bot commands, input methods, and privacy guarantee.
  */
 export async function helpCommand(ctx: CommandContext<Context>) {
   const helpText =
@@ -34,7 +34,11 @@ export async function helpCommand(ctx: CommandContext<Context>) {
     `🔘 *التعديل والتراجع:*\n` +
     `تحت كل مصروف تسجله، بيظهرلك خيارين:\n` +
     `• *❌ Undo:* لحذف المصروف فوراً إذا اتسجل بالخطأ.\n` +
-    `• *✏️ Category:* لتغيير التصنيف إلى أي تصنيف آخر.`;
+    `• *✏️ Category:* لتغيير التصنيف إلى أي تصنيف آخر.\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `🔒 *الخصوصية والأمان | Privacy & Security:*\n` +
+    `جميع تفاصيل مصاريفك ومشترياتك مشفرة بالكامل بتقنية (*AES-256-GCM*) عند حفظها في قاعدة البيانات.\n` +
+    `لا يمكن لأي طرف — بما في ذلك إدارة النظام — الاطلاع على تفاصيل ما اشتريته. خصوصيتك في أمان تام! 🛡️`;
 
   await ctx.reply(helpText, { parse_mode: "Markdown" });
 }
