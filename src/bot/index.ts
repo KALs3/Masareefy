@@ -24,6 +24,28 @@ export function createBot(): Bot {
 
   const bot = new Bot(getEnv().TELEGRAM_BOT_TOKEN);
 
+  // ─── Debug Request Logger Middleware ─────────────────────────────────────────
+  bot.use(async (ctx, next) => {
+    const type = ctx.message?.text
+      ? `text ("${ctx.message.text.slice(0, 30)}")`
+      : ctx.message?.photo
+      ? "photo/receipt"
+      : ctx.message?.voice
+      ? `voice (${ctx.message.voice.duration}s)`
+      : ctx.callbackQuery
+      ? `callback ("${ctx.callbackQuery.data}")`
+      : (Object.keys(ctx.update).find((k) => k !== "update_id") || "update");
+
+    const userLabel = ctx.from
+      ? `${ctx.from.first_name || "user"} (id: ${ctx.from.id})`
+      : "unknown";
+
+    console.log(`[Bot] ─── Incoming ${type} from ${userLabel}`);
+    const start = Date.now();
+    await next();
+    console.log(`[Bot] ─── Handled ${type} in ${Date.now() - start}ms`);
+  });
+
   // ─── Bot Commands ───────────────────────────────────────────────────────────
   bot.command("start", startCommand);
   bot.command("today", todayCommand);
