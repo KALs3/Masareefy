@@ -1,24 +1,40 @@
 import type { CommandContext, Context } from "grammy";
 
 /**
- * /help command — lists all available bot commands and input methods.
+ * /help command — lists all available bot commands and input methods in Arabic and English.
  */
 export async function helpCommand(ctx: CommandContext<Context>) {
   const helpText =
-    `💡 *Masareefy Bot Commands & Tips*\n\n` +
-    `*Commands:*\n` +
-    `• /start — Onboarding & default currency setup\n` +
-    `• /today — Breakdown of today's expenses\n` +
-    `• /month — Monthly category breakdown with progress bars\n` +
-    `• /export — Download all transactions as a CSV file\n` +
-    `• /dashboard — Open the Mini App web analytics\n` +
-    `• /help — Show this help menu\n\n` +
-    `*How to Log Expenses:*\n` +
-    `💬 *Text:* Send messages like \`150 coffee\` or \`Paid 300 for groceries\`\n` +
-    `🎙️ *Voice Note:* Send a voice message in English or Arabic (e.g., "دفعت 80 جنيه في الصيدلية")\n` +
-    `🧾 *Receipt / Photo:* Send a photo of a receipt or InstaPay / banking screenshot\n\n` +
-    `*Actions:*\n` +
-    `Under every logged expense, click *[❌ Undo]* to delete or *[✏️ Category]* to reassign.`;
+    `💡 *دليل استخدام بوت مصاريفي | Masareefy Guide*\n\n` +
+    `مرحباً بك! يمكنك تسجيل مصاريفك بكل سهولة وسرعة بعدة طرق:\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `📝 *طرق تسجيل المصاريف | How to Log:*\n\n` +
+    `💬 *رسالة نصية (Text):*\n` +
+    `اكتب المصروف بالعامية أو الفصحى أو الإنجليزية:\n` +
+    `• \`50 قهوة\`\n` +
+    `• \`دفعت 250 جنيه بنزين\`\n` +
+    `• \`سوبرماركت 450\`\n` +
+    `• \`120 Uber ride\`\n\n` +
+    `🎙️ *رسالة صوتية (Voice Note):*\n` +
+    `سجل فويس نوت بصوتك وقول صرفت كام وفين:\n` +
+    `• _"دفعت تمانين جنيه في الصيدلية"_\n` +
+    `• _"اشتريت كتب بـ 200 جنيه"_\n` +
+    `• _"Spent 150 on dinner with friends"_\n\n` +
+    `🧾 *صورة فاتورة أو إيصال (Receipt / Screenshot):*\n` +
+    `ابعت صورة فاتورة ورقية أو سكرين شوت تحويل إنستاباي (*InstaPay*) أو رسالة البنك، والبوت هيستخرج المبلغ واسم المحل تلقائياً!\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `⚡ *أوامر البوت | Commands:*\n` +
+    `• /today — 📅 ملخص مصاريف اليوم بالتفصيل\n` +
+    `• /month — 📊 تقرير الشهر ونسبة استهلاك الميزانية\n` +
+    `• /dashboard — 📈 فتح لوحة التحكم والرسوم البيانية (Mini App)\n` +
+    `• /export — 📁 تحميل جميع العمليات في ملف إكسيل (CSV)\n` +
+    `• /start — ⚙️ إعداد الحساب وتحديد العملة الافتراضية\n` +
+    `• /help — 💡 عرض قائمة المساعدة والتعليمات\n\n` +
+    `━━━━━━━━━━━━━━━━━━━━━\n` +
+    `🔘 *التعديل والتراجع:*\n` +
+    `تحت كل مصروف تسجله، بيظهرلك خيارين:\n` +
+    `• *❌ Undo:* لحذف المصروف فوراً إذا اتسجل بالخطأ.\n` +
+    `• *✏️ Category:* لتغيير التصنيف إلى أي تصنيف آخر.`;
 
   await ctx.reply(helpText, { parse_mode: "Markdown" });
 }

@@ -15,18 +15,18 @@ export async function dashboardCommand(ctx: CommandContext<Context>) {
   const keyboard = new InlineKeyboard();
 
   if (webAppUrl && webAppUrl.startsWith("https://")) {
-    keyboard.webApp("📈 Open Mini App Dashboard", webAppUrl);
+    keyboard.webApp("📈 فتح لوحة التحكم | Open Dashboard", webAppUrl);
   } else {
     keyboard.url(
-      "📈 Open Bot on Telegram",
+      "📈 فتح البوت | Open Bot",
       "https://t.me/Masareefyy_bot"
     );
   }
 
   await ctx.reply(
-    `📱 *Masareefy Mini App Dashboard*\n\n` +
-      `View your interactive spending analytics, monthly breakdown charts, category donuts, and transaction history.\n\n` +
-      `Click the button below to launch:`,
+    `📱 *لوحة تحكم مصاريفي | Masareefy Mini App*\n\n` +
+      `افتح التطبيق التفاعلي لمتابعة تحليلات المصاريف، الرسوم البيانية، ونسبة استهلاك الميزانية الشهرية.\n\n` +
+      `اضغط على الزر بالأسفل للفتح:`,
     { parse_mode: "Markdown", reply_markup: keyboard }
   );
 }
