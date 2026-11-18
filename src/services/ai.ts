@@ -139,31 +139,47 @@ function parseGeminiResponse(responseText: string | null | undefined): Extractio
   }
 }
 
+// Ultra-fast model for structured finance extraction (~1-2s response time)
+const PRIMARY_MODEL = "gemini-3.5-flash-lite";
+const FALLBACK_MODEL = "gemini-3.5-flash";
+
 /**
- * Call Gemini with retry logic for transient failures.
- * Retries once on network/server errors with a brief delay.
+ * Call Gemini with multi-model fallback and retry logic.
+ * Tries PRIMARY_MODEL first (gemini-3.5-flash-lite, ultra fast ~1s).
+ * Falls back to FALLBACK_MODEL if needed.
  */
 async function callGeminiWithRetry(
   genai: GoogleGenAI,
-  params: Parameters<GoogleGenAI["models"]["generateContent"]>[0],
-  label: string,
-  maxRetries: number = 1
+  params: Omit<Parameters<GoogleGenAI["models"]["generateContent"]>[0], "model">,
+  label: string
 ): Promise<string | null> {
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  const modelsToTry = [PRIMARY_MODEL, FALLBACK_MODEL];
+
+  for (let i = 0; i < modelsToTry.length; i++) {
+    const model = modelsToTry[i];
+    const startTime = Date.now();
     try {
-      const response = await genai.models.generateContent(params);
+      console.log(`[AI] Calling ${model} for ${label}...`);
+      const response = await genai.models.generateContent({
+        ...params,
+        model,
+      });
+      const duration = Date.now() - startTime;
+      console.log(`[AI] ✅ ${model} responded in ${duration}ms`);
       return response.text ?? null;
     } catch (error) {
-      const isLastAttempt = attempt === maxRetries;
+      const duration = Date.now() - startTime;
       console.error(
-        `[AI] Gemini ${label} attempt ${attempt + 1}/${maxRetries + 1} failed:`,
+        `[AI] ⚠️ ${model} for ${label} failed in ${duration}ms:`,
         error instanceof Error ? error.message : error
       );
 
-      if (isLastAttempt) throw error;
-
-      // Brief delay before retry (1 second)
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      // If there's another model to try, continue immediately
+      if (i < modelsToTry.length - 1) {
+        console.log(`[AI] Falling back to next model (${modelsToTry[i + 1]})...`);
+        continue;
+      }
+      throw error;
     }
   }
   return null;
@@ -184,7 +200,6 @@ export async function extractExpenseFromText(
   const responseText = await callGeminiWithRetry(
     genai,
     {
-      model: "gemini-3.5-flash",
       contents: text,
       config: {
         systemInstruction: systemPrompt,
@@ -218,7 +233,6 @@ export async function extractExpenseFromAudio(
   const responseText = await callGeminiWithRetry(
     genai,
     {
-      model: "gemini-3.5-flash",
       contents: [
         {
           role: "user",
@@ -272,7 +286,6 @@ export async function extractExpenseFromImage(
   const responseText = await callGeminiWithRetry(
     genai,
     {
-      model: "gemini-3.5-flash",
       contents: [
         {
           role: "user",
