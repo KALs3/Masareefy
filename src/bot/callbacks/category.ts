@@ -9,6 +9,30 @@ const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
+ * Compresses a 36-char UUID into a 22-char base64url string so
+ * `setcat:<22>:<22>` is 52 bytes — safely within Telegram's 64-byte callback_data limit.
+ */
+function encodeUuid(uuid: string): string {
+  return Buffer.from(uuid.replace(/-/g, ""), "hex").toString("base64url");
+}
+
+function decodeUuid(value: string): string | null {
+  if (UUID_REGEX.test(value)) return value;
+  try {
+    const buf = Buffer.from(value, "base64url");
+    if (buf.length !== 16) return null;
+    const hex = buf.toString("hex");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+  } catch {
+    return null;
+  }
+}
+
+function escapeMarkdown(text: string): string {
+  return text.replace(/([_*`\[])/g, "\\$1");
+}
+
+/**
  * Handles the "✏️ Category" inline button — shows a grid of categories to pick from.
  * Callback data format: "cat:<expense-uuid>"
  */
@@ -16,9 +40,9 @@ export async function handleCategoryChange(ctx: Context) {
   const data = ctx.callbackQuery?.data;
   if (!data) return;
 
-  const expenseId = data.split(":")[1];
+  const expenseId = decodeUuid(data.split(":")[1] || "");
   const userId = ctx.from?.id;
-  if (!expenseId || !userId || !UUID_REGEX.test(expenseId)) {
+  if (!expenseId || !userId) {
     return ctx.answerCallbackQuery({ text: "⚠️ Invalid request" });
   }
 
@@ -43,42 +67,39 @@ export async function handleCategoryChange(ctx: Context) {
     return ctx.answerCallbackQuery({ text: "No categories found" });
   }
 
-  // Build inline keyboard with category options
+  const shortExpenseId = encodeUuid(expenseId);
+
+  // Build inline keyboard with compact 52-byte callback_data (Telegram limit: 64 bytes)
   const keyboard = new InlineKeyboard();
   userCategories.forEach((cat, i) => {
     keyboard.text(
       `${cat.emoji ?? "💸"} ${cat.name}`,
-      `setcat:${expenseId}:${cat.id}`
+      `setcat:${shortExpenseId}:${encodeUuid(cat.id)}`
     );
     // 2 categories per row
     if (i % 2 === 1) keyboard.row();
   });
 
   await ctx.answerCallbackQuery();
-  await ctx.editMessageText("Select a new category:", {
+  await ctx.editMessageText("📁 *Select a new category | اختر التصنيف الجديد:*", {
+    parse_mode: "Markdown",
     reply_markup: keyboard,
   });
 }
 
 /**
  * Handles the actual category reassignment after user picks one.
- * Callback data format: "setcat:<expense-uuid>:<category-uuid>"
+ * Callback data format: "setcat:<short-expense-uuid>:<short-category-uuid>" (52 bytes)
  */
 export async function handleCategorySelect(ctx: Context) {
   const data = ctx.callbackQuery?.data;
   if (!data) return;
 
   const parts = data.split(":");
-  const expenseId = parts[1];
-  const categoryId = parts[2];
+  const expenseId = decodeUuid(parts[1] || "");
+  const categoryId = decodeUuid(parts[2] || "");
   const userId = ctx.from?.id;
-  if (
-    !expenseId ||
-    !categoryId ||
-    !userId ||
-    !UUID_REGEX.test(expenseId) ||
-    !UUID_REGEX.test(categoryId)
-  ) {
+  if (!expenseId || !categoryId || !userId) {
     return ctx.answerCallbackQuery({ text: "⚠️ Invalid request" });
   }
 
@@ -124,8 +145,8 @@ export async function handleCategorySelect(ctx: Context) {
     .text("✏️ Category", `cat:${expenseId}`);
 
   await ctx.editMessageText(
-    `✅ *Logged:* ${Number(expense.amount).toFixed(2)} ${expense.currency} — _${decryptedDesc}_\n` +
-      `📁 *Category:* ${categoryEmoji} ${categoryName}\n` +
+    `✅ *Logged:* ${Number(expense.amount).toFixed(2)} ${expense.currency} — _${escapeMarkdown(decryptedDesc)}_\n` +
+      `📁 *Category:* ${categoryEmoji} ${escapeMarkdown(categoryName)}\n` +
       `✏️ _Category updated_`,
     { parse_mode: "Markdown", reply_markup: keyboard }
   );
