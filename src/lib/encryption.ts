@@ -109,10 +109,15 @@ export function encryptField(plaintext: string, ctx: EncryptionContext): string 
 
 /**
  * Read-only legacy v1 decryption (for records written before v2 AAD upgrade).
+ * Tries TELEGRAM_BOT_TOKEN first (legacy v1 fallback) and ENCRYPTION_KEY if needed.
  */
 function decryptLegacyV1(storedValue: string, userId: number): string {
   const env = getEnv();
-  const masterSecret = process.env.ENCRYPTION_KEY_V1_LEGACY || env.ENCRYPTION_KEY || env.TELEGRAM_BOT_TOKEN;
+  const candidates = [
+    process.env.ENCRYPTION_KEY_V1_LEGACY,
+    env.TELEGRAM_BOT_TOKEN,
+    env.ENCRYPTION_KEY,
+  ].filter((v): v is string => Boolean(v));
 
   const parts = storedValue.slice(PREFIX_V1.length).split(":");
   if (parts.length !== 3) {
@@ -123,22 +128,31 @@ function decryptLegacyV1(storedValue: string, userId: number): string {
   const iv = Buffer.from(ivHex, "hex");
   const authTag = Buffer.from(tagHex, "hex");
 
-  const key = Buffer.from(
-    crypto.hkdfSync(
-      "sha256",
-      Buffer.from(masterSecret, "utf8"),
-      Buffer.from(`user-salt-${userId}`, "utf8"),
-      Buffer.from("masareefy-user-expenses-encryption-v1", "utf8"),
-      32
-    )
-  );
+  let lastError: unknown;
+  for (const masterSecret of candidates) {
+    try {
+      const key = Buffer.from(
+        crypto.hkdfSync(
+          "sha256",
+          Buffer.from(masterSecret, "utf8"),
+          Buffer.from(`user-salt-${userId}`, "utf8"),
+          Buffer.from("masareefy-user-expenses-encryption-v1", "utf8"),
+          32
+        )
+      );
 
-  const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
-  decipher.setAuthTag(authTag);
+      const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+      decipher.setAuthTag(authTag);
 
-  let decrypted = decipher.update(ciphertextHex, "hex", "utf8");
-  decrypted += decipher.final("utf8");
-  return decrypted;
+      let decrypted = decipher.update(ciphertextHex, "hex", "utf8");
+      decrypted += decipher.final("utf8");
+      return decrypted;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  throw lastError || new Error("Failed to decrypt v1 record");
 }
 
 /**
