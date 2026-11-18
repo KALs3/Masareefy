@@ -4,6 +4,7 @@ import { db } from "../../db/client";
 import { expenses, categories, users } from "../../db/schema";
 import { eq, and, gte, lte, sql } from "drizzle-orm";
 import type { ExtractionResult } from "../../services/ai";
+import { encryptText, decryptText } from "../../lib/encryption";
 
 /**
  * Common handler to save extracted expenses and reply with confirmation buttons and budget alerts.
@@ -38,23 +39,29 @@ export async function saveAndReplyExpenses(
 
     // Deduplication guard: prevent identical expense inserts within 20 seconds (fixes Telegram webhook retries)
     const twentySecondsAgo = new Date(Date.now() - 20 * 1000);
-    const [recentDuplicate] = await db
-      .select({ id: expenses.id })
+    const recentExpenses = await db
+      .select({ id: expenses.id, description: expenses.description })
       .from(expenses)
       .where(
         and(
           eq(expenses.userId, userId),
           eq(expenses.amount, exp.amount.toString()),
-          eq(expenses.description, exp.description || "Expense"),
           gte(expenses.createdAt, twentySecondsAgo)
         )
       )
-      .limit(1);
+      .limit(5);
 
-    if (recentDuplicate) {
+    const isDuplicate = recentExpenses.some(
+      (r) => decryptText(r.description, userId) === (exp.description || "Expense")
+    );
+
+    if (isDuplicate) {
       console.log(`[Dedupe] Skipped duplicate webhook insert for user ${userId}: ${exp.description}`);
       continue;
     }
+
+    // Encrypt sensitive description before storing at rest
+    const encryptedDescription = encryptText(exp.description || "Expense", userId);
 
     const [saved] = await db
       .insert(expenses)
@@ -63,7 +70,7 @@ export async function saveAndReplyExpenses(
         categoryId: matchedCategory?.id ?? null,
         amount: exp.amount.toString(),
         currency: exp.currency || user.currency || "EGP",
-        description: exp.description || "Expense",
+        description: encryptedDescription,
         sourceType,
         expenseDate: exp.expense_date || now.toISOString().split("T")[0],
       })

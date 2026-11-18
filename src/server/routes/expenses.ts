@@ -1,9 +1,10 @@
 import { Hono } from "hono";
 import { db } from "../../db/client";
 import { expenses, categories, users } from "../../db/schema";
-import { eq, and, gte, lte, desc, sql, ilike } from "drizzle-orm";
+import { eq, and, gte, lte, desc, sql } from "drizzle-orm";
 import { telegramAuth } from "../middleware/telegram-auth";
 import { z } from "zod";
+import { encryptText, decryptText } from "../../lib/encryption";
 
 const expensesRouter = new Hono<{
   Variables: {
@@ -37,8 +38,46 @@ expensesRouter.get("/", async (c) => {
   if (endDate) {
     conditions.push(lte(expenses.expenseDate, endDate));
   }
+
+  // If search is provided, we must search in-memory because descriptions are encrypted at rest
   if (search) {
-    conditions.push(ilike(expenses.description, `%${search}%`));
+    const whereClause = and(...conditions);
+    const allMatches = await db
+      .select({
+        id: expenses.id,
+        amount: expenses.amount,
+        currency: expenses.currency,
+        description: expenses.description,
+        sourceType: expenses.sourceType,
+        expenseDate: expenses.expenseDate,
+        createdAt: expenses.createdAt,
+        categoryId: expenses.categoryId,
+        categoryName: categories.name,
+        categoryEmoji: categories.emoji,
+      })
+      .from(expenses)
+      .leftJoin(categories, eq(expenses.categoryId, categories.id))
+      .where(whereClause)
+      .orderBy(desc(expenses.expenseDate), desc(expenses.createdAt));
+
+    const decrypted = allMatches
+      .map((r) => ({
+        ...r,
+        description: decryptText(r.description, userId),
+      }))
+      .filter((r) => r.description.toLowerCase().includes(search.toLowerCase()));
+
+    const paginated = decrypted.slice(offset, offset + limit);
+
+    return c.json({
+      data: paginated,
+      pagination: {
+        total: decrypted.length,
+        limit,
+        offset,
+        hasMore: offset + limit < decrypted.length,
+      },
+    });
   }
 
   const whereClause = and(...conditions);
@@ -52,7 +91,7 @@ expensesRouter.get("/", async (c) => {
   const total = Number(totalCountResult?.count || 0);
 
   // Fetch paginated expenses joined with category
-  const results = await db
+  const rawResults = await db
     .select({
       id: expenses.id,
       amount: expenses.amount,
@@ -71,6 +110,11 @@ expensesRouter.get("/", async (c) => {
     .orderBy(desc(expenses.expenseDate), desc(expenses.createdAt))
     .limit(limit)
     .offset(offset);
+
+  const results = rawResults.map((r) => ({
+    ...r,
+    description: decryptText(r.description, userId),
+  }));
 
   return c.json({
     data: results,
@@ -112,13 +156,14 @@ expensesRouter.post("/", async (c) => {
     .then((r) => r[0]);
 
   const currency = parsed.data.currency || user?.currency || "EGP";
+  const encryptedDescription = encryptText(parsed.data.description, userId);
 
   const [created] = await db
     .insert(expenses)
     .values({
       userId,
       amount: parsed.data.amount.toFixed(2),
-      description: parsed.data.description,
+      description: encryptedDescription,
       categoryId: parsed.data.categoryId || null,
       currency,
       sourceType: "manual",
@@ -165,7 +210,16 @@ expensesRouter.post("/", async (c) => {
     }
   }
 
-  return c.json({ expense: created, budgetAlert }, 201);
+  return c.json(
+    {
+      expense: {
+        ...created,
+        description: parsed.data.description,
+      },
+      budgetAlert,
+    },
+    201
+  );
 });
 
 // ─── PATCH /api/expenses/:id (Update an expense) ──────────────────────────────
@@ -195,7 +249,7 @@ expensesRouter.patch("/:id", async (c) => {
     updateData.amount = parsed.data.amount.toFixed(2);
   }
   if (parsed.data.description !== undefined) {
-    updateData.description = parsed.data.description;
+    updateData.description = encryptText(parsed.data.description, userId);
   }
   if (parsed.data.categoryId !== undefined) {
     updateData.categoryId = parsed.data.categoryId;
@@ -217,7 +271,13 @@ expensesRouter.patch("/:id", async (c) => {
     return c.json({ error: "Expense not found or unauthorized" }, 404);
   }
 
-  return c.json({ expense: updated });
+  return c.json({
+    expense: {
+      ...updated,
+      description:
+        parsed.data.description ?? decryptText(updated.description, userId),
+    },
+  });
 });
 
 // ─── DELETE /api/expenses/:id (Delete an expense) ────────────────────────────

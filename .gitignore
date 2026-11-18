@@ -38,3 +38,4 @@ drizzle/migrations/
 # IDE
 .idea/
 .vscode/
+.env*

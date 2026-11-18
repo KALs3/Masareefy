@@ -3,6 +3,7 @@ import { InputFile } from "grammy";
 import { db } from "../../db/client";
 import { expenses, categories, users } from "../../db/schema";
 import { eq, desc } from "drizzle-orm";
+import { decryptText } from "../../lib/encryption";
 
 function escapeCsvField(val: string | number | null | undefined): string {
   if (val === null || val === undefined) return "";
@@ -68,7 +69,7 @@ export async function exportCommand(ctx: CommandContext<Context>) {
   const rows = userExpenses.map((e) => [
     escapeCsvField(e.id),
     escapeCsvField(e.date),
-    escapeCsvField(e.description),
+    escapeCsvField(decryptText(e.description, userId)),
     escapeCsvField(e.categoryName || "Uncategorized"),
     escapeCsvField(e.amount),
     escapeCsvField(e.currency),
