@@ -55,8 +55,8 @@ meRouter.get("/", async (c) => {
 
 // PATCH /api/me
 const updateMeSchema = z.object({
-  currency: z.string().min(1).max(10).optional(),
-  monthlyBudget: z.number().nonnegative().optional(),
+  currency: z.string().trim().min(1).max(10).optional(),
+  monthlyBudget: z.number().finite().nonnegative().max(999_999_999.99).optional(),
 });
 
 meRouter.patch("/", async (c) => {

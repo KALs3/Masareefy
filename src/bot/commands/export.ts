@@ -3,12 +3,23 @@ import { InputFile } from "grammy";
 import { db } from "../../db/client";
 import { expenses, categories, users } from "../../db/schema";
 import { eq, desc } from "drizzle-orm";
-import { decryptText } from "../../lib/encryption";
+import { decryptField } from "../../lib/encryption";
+import { checkExportRateLimit } from "../utils/rate-limiter";
 
+/**
+ * Escapes a CSV cell safely and neutralizes CSV/spreadsheet formula injection
+ * (OWASP: prefix cells starting with =, +, -, @, tab, or CR with a single quote).
+ */
 function escapeCsvField(val: string | number | null | undefined): string {
   if (val === null || val === undefined) return "";
-  const str = String(val);
-  if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+  let str = String(val);
+
+  // Neutralize spreadsheet formula injection
+  if (/^[=+\-@\t\r]/.test(str)) {
+    str = `'${str}`;
+  }
+
+  if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
     return `"${str.replace(/"/g, '""')}"`;
   }
   return str;
@@ -16,10 +27,17 @@ function escapeCsvField(val: string | number | null | undefined): string {
 
 /**
  * /export command — generates and sends a downloadable .csv file of all user transactions.
+ * Built entirely in memory (no temporary files written to disk).
  */
 export async function exportCommand(ctx: CommandContext<Context>) {
   const userId = ctx.from?.id;
   if (!userId) return;
+
+  if (!checkExportRateLimit(userId)) {
+    return ctx.reply(
+      "⏳ You've exported too many times recently. Please wait a few minutes before exporting again."
+    );
+  }
 
   const user = await db
     .select()
@@ -33,7 +51,7 @@ export async function exportCommand(ctx: CommandContext<Context>) {
 
   await ctx.replyWithChatAction("upload_document");
 
-  // Fetch all user expenses ordered by date descending
+  // Fetch all user expenses ordered by date descending (strictly scoped by userId)
   const userExpenses = await db
     .select({
       id: expenses.id,
@@ -69,7 +87,13 @@ export async function exportCommand(ctx: CommandContext<Context>) {
   const rows = userExpenses.map((e) => [
     escapeCsvField(e.id),
     escapeCsvField(e.date),
-    escapeCsvField(decryptText(e.description, userId)),
+    escapeCsvField(
+      decryptField(e.description, {
+        userId,
+        recordId: e.id,
+        field: "description",
+      })
+    ),
     escapeCsvField(e.categoryName || "Uncategorized"),
     escapeCsvField(e.amount),
     escapeCsvField(e.currency),

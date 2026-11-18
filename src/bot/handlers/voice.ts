@@ -38,11 +38,19 @@ export async function handleVoiceMessage(ctx: Context) {
     });
   }
 
-  // Reject very short voice notes (< 1 second) — they're usually accidental
+  // Reject very short (< 1s) or excessively long (> 120s) voice notes
   if (voice.duration !== undefined && voice.duration < 1) {
     return ctx.reply(
       "⚠️ That voice note was too short. Please record a longer message describing your expense."
     );
+  }
+  if (voice.duration !== undefined && voice.duration > 120) {
+    return ctx.reply(
+      "⚠️ That voice note is too long (max 2 minutes). Please keep voice notes short."
+    );
+  }
+  if (voice.file_size !== undefined && voice.file_size > 10 * 1024 * 1024) {
+    return ctx.reply("⚠️ Audio file is too large (max 10 MB).");
   }
 
   // Fetch user's categories for the AI prompt

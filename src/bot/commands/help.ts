@@ -1,7 +1,7 @@
 import type { CommandContext, Context } from "grammy";
 
 /**
- * /help command — lists all available bot commands, input methods, and privacy guarantee.
+ * /help command — lists all available bot commands, input methods, and an honest privacy notice.
  */
 export async function helpCommand(ctx: CommandContext<Context>) {
   const helpText =
@@ -29,6 +29,7 @@ export async function helpCommand(ctx: CommandContext<Context>) {
     `• /dashboard — 📈 فتح لوحة التحكم والرسوم البيانية (Mini App)\n` +
     `• /export — 📁 تحميل جميع العمليات في ملف إكسيل (CSV)\n` +
     `• /start — ⚙️ إعداد الحساب وتحديد العملة الافتراضية\n` +
+    `• /delete\\_my\\_data — 🗑️ حذف حسابك وجميع بياناتك نهائياً\n` +
     `• /help — 💡 عرض قائمة المساعدة والتعليمات\n\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n` +
     `🔘 *التعديل والتراجع:*\n` +
@@ -36,9 +37,10 @@ export async function helpCommand(ctx: CommandContext<Context>) {
     `• *❌ Undo:* لحذف المصروف فوراً إذا اتسجل بالخطأ.\n` +
     `• *✏️ Category:* لتغيير التصنيف إلى أي تصنيف آخر.\n\n` +
     `━━━━━━━━━━━━━━━━━━━━━\n` +
-    `🔒 *الخصوصية والأمان | Privacy & Security:*\n` +
-    `جميع تفاصيل مصاريفك ومشترياتك مشفرة بالكامل بتقنية (*AES-256-GCM*) عند حفظها في قاعدة البيانات.\n` +
-    `لا يمكن لأي طرف — بما في ذلك إدارة النظام — الاطلاع على تفاصيل ما اشتريته. خصوصيتك في أمان تام! 🛡️`;
+    `🔒 *الخصوصية والأمان | Privacy Notice:*\n` +
+    `• *التشفير عند التخزين (Encrypted at Rest):* يتم تشفير وصف جميع مصاريفك ومشترياتك بتقنية *AES-256-GCM* بمفتاح مشتق لكل مستخدم قبل حفظها في قاعدة البيانات، بينما تبقى الأرقام والتواريخ والتصنيفات لحساب التقارير والرسوم البيانية.\n` +
+    `• *الملفات الصوتية والصور:* تُعالج مؤقتاً في الذاكرة فقط ولا يتم تخزينها أبداً.\n` +
+    `• *الشفافية:* يتم نقل رسائل البوت عبر خوادم Telegram ومعالجتها بواسطة Google Gemini لاستخراج تفاصيل المصروف. كما يمكنك حذف جميع بياناتك نهائياً في أي وقت باستخدام /delete\\_my\\_data.`;
 
   await ctx.reply(helpText, { parse_mode: "Markdown" });
 }

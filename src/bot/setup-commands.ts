@@ -8,6 +8,7 @@ export const BOT_COMMANDS = [
   { command: "export", description: "📁 تصدير إكسيل | Export CSV" },
   { command: "help", description: "💡 المساعدة وكيفية الاستخدام | Help & Guide" },
   { command: "start", description: "⚙️ ضبط الحساب والعملة | Settings" },
+  { command: "delete_my_data", description: "🗑️ حذف جميع بياناتي | Delete all my data" },
 ];
 
 // Dedicated Arabic command menu for Arabic Telegram clients
@@ -18,6 +19,7 @@ export const BOT_COMMANDS_AR = [
   { command: "export", description: "📁 تحميل تقرير المصاريف (CSV)" },
   { command: "help", description: "💡 المساعدة وطريقة تسجيل المصاريف" },
   { command: "start", description: "⚙️ إعداد الحساب وتغيير العملة" },
+  { command: "delete_my_data", description: "🗑️ حذف حسابي وجميع بياناتي نهائياً" },
 ];
 
 export async function registerBotCommands() {

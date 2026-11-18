@@ -6,6 +6,10 @@ import { monthCommand } from "./commands/month";
 import { exportCommand } from "./commands/export";
 import { dashboardCommand } from "./commands/dashboard";
 import { helpCommand } from "./commands/help";
+import {
+  deleteDataCommand,
+  handleDeleteDataCallback,
+} from "./commands/delete-data";
 import { handleCurrencySelection } from "./callbacks/currency";
 import { handleUndo } from "./callbacks/undo";
 import { handleCategoryChange, handleCategorySelect } from "./callbacks/category";
@@ -24,26 +28,42 @@ export function createBot(): Bot {
 
   const bot = new Bot(getEnv().TELEGRAM_BOT_TOKEN);
 
-  // ─── Debug Request Logger Middleware ─────────────────────────────────────────
+  // ─── 1. Privacy-Safe Request Logger (NEVER logs message text, amounts, or data) ─
   bot.use(async (ctx, next) => {
     const type = ctx.message?.text
-      ? `text ("${ctx.message.text.slice(0, 30)}")`
+      ? ctx.message.text.startsWith("/")
+        ? "command"
+        : "text"
       : ctx.message?.photo
-      ? "photo/receipt"
-      : ctx.message?.voice
-      ? `voice (${ctx.message.voice.duration}s)`
+      ? "photo"
+      : ctx.message?.voice || ctx.message?.audio
+      ? "voice"
       : ctx.callbackQuery
-      ? `callback ("${ctx.callbackQuery.data}")`
-      : (Object.keys(ctx.update).find((k) => k !== "update_id") || "update");
+      ? "callback"
+      : Object.keys(ctx.update).find((k) => k !== "update_id") || "update";
 
-    const userLabel = ctx.from
-      ? `${ctx.from.first_name || "user"} (id: ${ctx.from.id})`
-      : "unknown";
-
-    console.log(`[Bot] ─── Incoming ${type} from ${userLabel}`);
     const start = Date.now();
     await next();
-    console.log(`[Bot] ─── Handled ${type} in ${Date.now() - start}ms`);
+    const duration = Date.now() - start;
+
+    // Log only safe metadata (type, user ID, timing) — zero plaintext content
+    console.log(
+      `[Bot] type=${type} user=${ctx.from?.id ?? "unknown"} chat=${ctx.chat?.type ?? "unknown"} duration=${duration}ms`
+    );
+  });
+
+  // ─── 2. Restrict Bot to Private Chats Only (prevents financial leaks in groups) ─
+  bot.use(async (ctx, next) => {
+    if (ctx.chat && ctx.chat.type !== "private") {
+      // Only reply if directly invoking a command in a group; silently ignore general group chatter
+      if (ctx.message?.text?.startsWith("/")) {
+        await ctx.reply(
+          "🔒 For your privacy, Masareefy only works in private 1-on-1 chats. Please message me directly!"
+        );
+      }
+      return;
+    }
+    await next();
   });
 
   // ─── Bot Commands ───────────────────────────────────────────────────────────
@@ -53,12 +73,14 @@ export function createBot(): Bot {
   bot.command("export", exportCommand);
   bot.command("dashboard", dashboardCommand);
   bot.command("help", helpCommand);
+  bot.command("delete_my_data", deleteDataCommand);
 
   // ─── Inline Button Callback Queries ─────────────────────────────────────────
   bot.callbackQuery(/^currency:/, handleCurrencySelection);
   bot.callbackQuery(/^undo:/, handleUndo);
   bot.callbackQuery(/^cat:/, handleCategoryChange);
   bot.callbackQuery(/^setcat:/, handleCategorySelect);
+  bot.callbackQuery(/^deldata:/, handleDeleteDataCallback);
 
   // ─── Multimodal Message Handlers ────────────────────────────────────────────
   // 1. Voice notes and audio files
@@ -70,9 +92,10 @@ export function createBot(): Bot {
   // 3. Natural language text messages
   bot.on("message:text", handleTextMessage);
 
-  // ─── Error Handling ─────────────────────────────────────────────────────────
+  // ─── Error Handling (log error name/message safely without context dump) ────
   bot.catch((err) => {
-    console.error("Bot error:", err);
+    const msg = err.error instanceof Error ? err.error.message : "Unknown error";
+    console.error(`[Bot] Handler error (update_id=${err.ctx.update.update_id}): ${msg}`);
   });
 
   _bot = bot;

@@ -52,6 +52,10 @@ export async function handlePhotoMessage(ctx: Context) {
   try {
     // Get the highest resolution photo (last element in array)
     const bestPhoto = photos[photos.length - 1];
+    if (bestPhoto.file_size !== undefined && bestPhoto.file_size > 10 * 1024 * 1024) {
+      return ctx.reply("⚠️ That image is too large (max 10 MB). Please send a smaller photo.");
+    }
+
     const file = await ctx.api.getFile(bestPhoto.file_id);
 
     if (!file.file_path) {
@@ -73,8 +77,10 @@ export async function handlePhotoMessage(ctx: Context) {
     // Determine MIME type — Telegram photos are JPEG; documents may vary
     const mimeType = "image/jpeg";
 
-    // Extract caption if the user added one (e.g., "grocery receipt 150 EGP")
-    const caption = ctx.message?.caption || undefined;
+    // Extract caption if the user added one (bounded to 500 chars)
+    const caption = ctx.message?.caption
+      ? ctx.message.caption.trim().slice(0, 500)
+      : undefined;
 
     const result = await extractExpenseFromImage(
       imageBuffer,

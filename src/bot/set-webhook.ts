@@ -7,7 +7,18 @@ export async function configureWebhook(domainUrl?: string) {
 
   let targetUrl = domainUrl || env.WEBHOOK_URL;
   if (!targetUrl) {
-    console.error("❌ Please provide a deployment URL. Usage: npx tsx src/bot/set-webhook.ts https://your-app.vercel.app");
+    console.error(
+      "❌ Please provide a deployment URL. Usage: npm run webhook:set https://your-app.vercel.app"
+    );
+    process.exit(1);
+  }
+
+  if (!env.WEBHOOK_SECRET_TOKEN) {
+    console.error(
+      "❌ WEBHOOK_SECRET_TOKEN is not set in .env.local!\n" +
+        "   Generate one with: openssl rand -hex 32\n" +
+        "   Add it to both .env.local and Vercel Environment Variables before setting the webhook."
+    );
     process.exit(1);
   }
 
@@ -17,13 +28,14 @@ export async function configureWebhook(domainUrl?: string) {
     targetUrl = `${targetUrl}/api/webhook`;
   }
 
-  console.log(`Setting Telegram webhook to: ${targetUrl}...`);
+  console.log(`Setting Telegram webhook to: ${targetUrl} (with secret_token)...`);
 
   try {
     await bot.api.setWebhook(targetUrl, {
       drop_pending_updates: false,
+      secret_token: env.WEBHOOK_SECRET_TOKEN,
     });
-    console.log(`✅ Webhook registered successfully with Telegram!`);
+    console.log(`✅ Webhook registered successfully with Telegram (secret_token verified)!`);
 
     const info = await bot.api.getWebhookInfo();
     console.log("Webhook Info:", {

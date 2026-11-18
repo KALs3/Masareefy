@@ -1,6 +1,8 @@
+import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { createBot } from "../bot";
 import { webhookCallback } from "grammy";
+import { getEnv } from "../lib/env";
 import meRouter from "./routes/me";
 import dashboardRouter from "./routes/dashboard";
 import expensesRouter from "./routes/expenses";
@@ -23,18 +25,42 @@ const handleUpdate = webhookCallback(bot, "hono", "return", 55_000);
 // In-memory deduplication cache for Telegram update_id
 const seenUpdateIds = new Map<number, number>();
 
+/**
+ * Constant-time verification of Telegram's X-Telegram-Bot-Api-Secret-Token header.
+ */
+function isValidWebhookSecret(provided: string | undefined, expected: string): boolean {
+  if (!provided) return false;
+  const a = Buffer.from(provided, "utf8");
+  const b = Buffer.from(expected, "utf8");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
 app.post("/webhook", async (c) => {
+  // 0. Verify Telegram Webhook Secret Token (prevents spoofed webhook requests)
+  const expectedSecret = getEnv().WEBHOOK_SECRET_TOKEN;
+  if (expectedSecret) {
+    const providedSecret = c.req.header("x-telegram-bot-api-secret-token");
+    if (!isValidWebhookSecret(providedSecret, expectedSecret)) {
+      console.warn("[Webhook] Rejected unauthorized webhook request (invalid secret token)");
+      return c.text("Unauthorized", 401);
+    }
+  } else if (process.env.NODE_ENV === "production") {
+    console.error("[Webhook] WEBHOOK_SECRET_TOKEN is not set in production! Rejecting request.");
+    return c.text("Server misconfigured", 500);
+  }
+
   // 1. Inspect update_id to instantly drop duplicate Telegram retries
   try {
     const rawBody = await c.req.raw.clone().json();
     const updateId = rawBody?.update_id;
 
-    if (updateId) {
+    if (typeof updateId === "number") {
       const now = Date.now();
       const lastSeen = seenUpdateIds.get(updateId);
 
       if (lastSeen && now - lastSeen < 120_000) {
-        console.log(`[Dedupe] Dropping duplicate Telegram update_id: ${updateId}`);
+        console.log(`[Dedupe] Dropping duplicate Telegram update_id=${updateId}`);
         // Return 200 OK immediately so Telegram stops retrying
         return c.text("OK", 200);
       }

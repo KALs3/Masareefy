@@ -2,7 +2,7 @@ import type { CommandContext, Context } from "grammy";
 import { db } from "../../db/client";
 import { expenses, categories, users } from "../../db/schema";
 import { eq, and, desc } from "drizzle-orm";
-import { decryptText } from "../../lib/encryption";
+import { decryptField } from "../../lib/encryption";
 
 /**
  * /today command — displays an itemized list and total of today's expenses.
@@ -56,7 +56,11 @@ export async function todayCommand(ctx: CommandContext<Context>) {
   for (const exp of todayExpenses) {
     const emoji = exp.categoryEmoji || "💸";
     const src = exp.sourceType === "voice" ? "🎙️" : exp.sourceType === "photo" ? "🧾" : "💬";
-    const decryptedDesc = decryptText(exp.description, userId);
+    const decryptedDesc = decryptField(exp.description, {
+      userId,
+      recordId: exp.id,
+      field: "description",
+    });
     message += `• ${emoji} *${Number(exp.amount).toFixed(2)} ${exp.currency}* — _${decryptedDesc}_ (${src})\n`;
   }
 

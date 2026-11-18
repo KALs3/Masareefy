@@ -114,13 +114,16 @@ function parseGeminiResponse(responseText: string | null | undefined): Extractio
   try {
     const parsed = JSON.parse(responseText);
 
-    // Validate essential fields exist
+    // Validate essential fields exist and amounts are sane/bounded
     return {
       is_expense: Boolean(parsed.is_expense),
       expenses: Array.isArray(parsed.expenses)
         ? parsed.expenses.filter(
             (e: Record<string, unknown>) =>
-              typeof e.amount === "number" && e.amount > 0
+              typeof e.amount === "number" &&
+              Number.isFinite(e.amount) &&
+              e.amount > 0 &&
+              e.amount <= 999_999_999.99
           )
         : [],
       reply_message:
@@ -130,7 +133,9 @@ function parseGeminiResponse(responseText: string | null | undefined): Extractio
           : "I couldn't find expense details in that."),
     };
   } catch (parseError) {
-    console.error("[AI] Failed to parse Gemini JSON response:", parseError, "Raw:", responseText);
+    // Log strictly without raw responseText to prevent plaintext expense leaks in logs
+    const errName = parseError instanceof Error ? parseError.name : "ParseError";
+    console.error(`[AI] Failed to parse Gemini JSON response (${errName})`);
     return {
       is_expense: false,
       expenses: [],

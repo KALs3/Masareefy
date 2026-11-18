@@ -1,10 +1,11 @@
+import crypto from "node:crypto";
 import type { Context } from "grammy";
 import { InlineKeyboard } from "grammy";
 import { db } from "../../db/client";
 import { expenses, categories, users } from "../../db/schema";
 import { eq, and, gte, lte, sql } from "drizzle-orm";
 import type { ExtractionResult } from "../../services/ai";
-import { encryptText, decryptText } from "../../lib/encryption";
+import { encryptField, decryptField } from "../../lib/encryption";
 
 /**
  * Common handler to save extracted expenses and reply with confirmation buttons and budget alerts.
@@ -32,6 +33,13 @@ export async function saveAndReplyExpenses(
     .split("T")[0];
 
   for (const exp of result.expenses) {
+    // Sanity-bound amount to match numeric(12, 2) and prevent DB overflow
+    if (!Number.isFinite(exp.amount) || exp.amount <= 0 || exp.amount > 999_999_999.99) {
+      continue;
+    }
+
+    const cleanDescription = (exp.description || "Expense").trim().slice(0, 255);
+
     // Find matching category (case-insensitive)
     const matchedCategory = userCategories.find(
       (c) => c.name.toLowerCase() === exp.category.toLowerCase()
@@ -45,31 +53,42 @@ export async function saveAndReplyExpenses(
       .where(
         and(
           eq(expenses.userId, userId),
-          eq(expenses.amount, exp.amount.toString()),
+          eq(expenses.amount, exp.amount.toFixed(2)),
           gte(expenses.createdAt, twentySecondsAgo)
         )
       )
       .limit(5);
 
     const isDuplicate = recentExpenses.some(
-      (r) => decryptText(r.description, userId) === (exp.description || "Expense")
+      (r) =>
+        decryptField(r.description, {
+          userId,
+          recordId: r.id,
+          field: "description",
+        }) === cleanDescription
     );
 
     if (isDuplicate) {
-      console.log(`[Dedupe] Skipped duplicate webhook insert for user ${userId}: ${exp.description}`);
+      console.log(`[Dedupe] Skipped duplicate webhook insert for user=${userId}`);
       continue;
     }
 
-    // Encrypt sensitive description before storing at rest
-    const encryptedDescription = encryptText(exp.description || "Expense", userId);
+    // Pre-generate UUID so AAD cryptographically binds (userId, recordId, field)
+    const expenseId = crypto.randomUUID();
+    const encryptedDescription = encryptField(cleanDescription, {
+      userId,
+      recordId: expenseId,
+      field: "description",
+    });
 
     const [saved] = await db
       .insert(expenses)
       .values({
+        id: expenseId,
         userId,
         categoryId: matchedCategory?.id ?? null,
-        amount: exp.amount.toString(),
-        currency: exp.currency || user.currency || "EGP",
+        amount: exp.amount.toFixed(2),
+        currency: (exp.currency || user.currency || "EGP").slice(0, 10),
         description: encryptedDescription,
         sourceType,
         expenseDate: exp.expense_date || now.toISOString().split("T")[0],

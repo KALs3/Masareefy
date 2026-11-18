@@ -4,12 +4,68 @@ import { eq, and, sql } from "drizzle-orm";
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 export const RATE_LIMITS = {
-  MAX_REQUESTS_PER_MINUTE: 5,   // Burst limit per user
-  MAX_EXPENSES_PER_DAY: 35,     // Daily limit per user
+  MAX_REQUESTS_PER_MINUTE: 5,     // Burst limit per user for AI logging
+  MAX_EXPENSES_PER_DAY: 35,       // Daily AI expense cap per user
+  MAX_EXPORTS_PER_10_MIN: 3,      // Export spam protection
+  MAX_API_REQUESTS_PER_MINUTE: 60,// Mini App API burst protection
 };
 
-// In-memory sliding window cache for burst protection (survives warm lambdas)
+// In-memory sliding window caches (survive warm lambdas)
 const userRequestTimestamps = new Map<number, number[]>();
+const userExportTimestamps = new Map<number, number[]>();
+const userApiTimestamps = new Map<number, number[]>();
+
+function checkSlidingWindow(
+  store: Map<number, number[]>,
+  userId: number,
+  windowMs: number,
+  maxRequests: number
+): boolean {
+  const now = Date.now();
+  const cutoff = now - windowMs;
+  const timestamps = (store.get(userId) || []).filter((t) => t > cutoff);
+
+  if (timestamps.length >= maxRequests) {
+    store.set(userId, timestamps);
+    return false;
+  }
+
+  timestamps.push(now);
+  store.set(userId, timestamps);
+
+  if (store.size > 2000) {
+    for (const [uid, times] of store.entries()) {
+      const valid = times.filter((t) => t > cutoff);
+      if (valid.length === 0) store.delete(uid);
+      else store.set(uid, valid);
+    }
+  }
+  return true;
+}
+
+/**
+ * Rate limit check for expensive `/export` operations (max 3 per 10 minutes).
+ */
+export function checkExportRateLimit(userId: number): boolean {
+  return checkSlidingWindow(
+    userExportTimestamps,
+    userId,
+    10 * 60 * 1000,
+    RATE_LIMITS.MAX_EXPORTS_PER_10_MIN
+  );
+}
+
+/**
+ * Rate limit check for Mini App REST API (max 60 requests/min per user).
+ */
+export function checkApiRateLimit(userId: number): boolean {
+  return checkSlidingWindow(
+    userApiTimestamps,
+    userId,
+    60 * 1000,
+    RATE_LIMITS.MAX_API_REQUESTS_PER_MINUTE
+  );
+}
 
 /**
  * Checks if a user is exceeding the rate limits:

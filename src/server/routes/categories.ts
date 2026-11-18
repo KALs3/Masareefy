@@ -43,9 +43,9 @@ categoriesRouter.get("/", async (c) => {
 
 // POST /api/categories (Create new custom category)
 const createCategorySchema = z.object({
-  name: z.string().min(1).max(100),
+  name: z.string().trim().min(1).max(100),
   emoji: z.string().max(10).default("💸"),
-  budgetLimit: z.number().positive().optional().nullable(),
+  budgetLimit: z.number().finite().positive().max(999_999_999.99).optional().nullable(),
 });
 
 categoriesRouter.post("/", async (c) => {
@@ -55,6 +55,16 @@ categoriesRouter.post("/", async (c) => {
 
   if (!parsed.success) {
     return c.json({ error: "Invalid input", details: parsed.error.format() }, 400);
+  }
+
+  // Cap categories per user to prevent DB abuse
+  const [catCount] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(categories)
+    .where(eq(categories.userId, userId));
+
+  if (Number(catCount?.count || 0) >= 50) {
+    return c.json({ error: "Maximum number of categories (50) reached" }, 400);
   }
 
   try {

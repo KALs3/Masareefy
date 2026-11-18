@@ -1,10 +1,15 @@
+import crypto from "node:crypto";
 import { Hono } from "hono";
 import { db } from "../../db/client";
 import { expenses, categories, users } from "../../db/schema";
 import { eq, and, gte, lte, desc, sql } from "drizzle-orm";
 import { telegramAuth } from "../middleware/telegram-auth";
 import { z } from "zod";
-import { encryptText, decryptText } from "../../lib/encryption";
+import { encryptField, decryptField } from "../../lib/encryption";
+
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_AMOUNT = 999_999_999.99;
 
 const expensesRouter = new Hono<{
   Variables: {
@@ -13,6 +18,23 @@ const expensesRouter = new Hono<{
 }>();
 
 expensesRouter.use("*", telegramAuth);
+
+/**
+ * Verifies a category UUID belongs to the authenticated user (prevents cross-tenant IDOR).
+ */
+async function assertOwnedCategory(
+  userId: number,
+  categoryId: string | null | undefined
+): Promise<boolean> {
+  if (!categoryId) return true;
+  if (!UUID_REGEX.test(categoryId)) return false;
+  const [cat] = await db
+    .select({ id: categories.id })
+    .from(categories)
+    .where(and(eq(categories.id, categoryId), eq(categories.userId, userId)))
+    .limit(1);
+  return Boolean(cat);
+}
 
 // ─── GET /api/expenses (Paginated list with filters) ──────────────────────────
 expensesRouter.get("/", async (c) => {
@@ -24,22 +46,22 @@ expensesRouter.get("/", async (c) => {
   const categoryId = query.category_id;
   const startDate = query.start_date;
   const endDate = query.end_date;
-  const search = query.search?.trim();
+  const search = query.search?.trim().slice(0, 100);
 
-  // Build filter conditions
+  // Build filter conditions (always scoped by verified userId)
   const conditions = [eq(expenses.userId, userId)];
 
-  if (categoryId) {
+  if (categoryId && UUID_REGEX.test(categoryId)) {
     conditions.push(eq(expenses.categoryId, categoryId));
   }
-  if (startDate) {
+  if (startDate && /^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
     conditions.push(gte(expenses.expenseDate, startDate));
   }
-  if (endDate) {
+  if (endDate && /^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
     conditions.push(lte(expenses.expenseDate, endDate));
   }
 
-  // If search is provided, we must search in-memory because descriptions are encrypted at rest
+  // If search is provided, decrypt in-memory (bounded to 2000 rows to avoid DoS)
   if (search) {
     const whereClause = and(...conditions);
     const allMatches = await db
@@ -58,14 +80,20 @@ expensesRouter.get("/", async (c) => {
       .from(expenses)
       .leftJoin(categories, eq(expenses.categoryId, categories.id))
       .where(whereClause)
-      .orderBy(desc(expenses.expenseDate), desc(expenses.createdAt));
+      .orderBy(desc(expenses.expenseDate), desc(expenses.createdAt))
+      .limit(2000);
 
+    const lowerSearch = search.toLowerCase();
     const decrypted = allMatches
       .map((r) => ({
         ...r,
-        description: decryptText(r.description, userId),
+        description: decryptField(r.description, {
+          userId,
+          recordId: r.id,
+          field: "description",
+        }),
       }))
-      .filter((r) => r.description.toLowerCase().includes(search.toLowerCase()));
+      .filter((r) => r.description.toLowerCase().includes(lowerSearch));
 
     const paginated = decrypted.slice(offset, offset + limit);
 
@@ -113,7 +141,11 @@ expensesRouter.get("/", async (c) => {
 
   const results = rawResults.map((r) => ({
     ...r,
-    description: decryptText(r.description, userId),
+    description: decryptField(r.description, {
+      userId,
+      recordId: r.id,
+      field: "description",
+    }),
   }));
 
   return c.json({
@@ -129,10 +161,10 @@ expensesRouter.get("/", async (c) => {
 
 // ─── POST /api/expenses (Manual expense creation from dashboard) ──────────────
 const createExpenseSchema = z.object({
-  amount: z.number().positive(),
-  description: z.string().min(1).max(255),
+  amount: z.number().finite().positive().max(MAX_AMOUNT),
+  description: z.string().trim().min(1).max(255),
   categoryId: z.string().uuid().optional().nullable(),
-  currency: z.string().min(1).max(10).optional(),
+  currency: z.string().trim().min(1).max(10).optional(),
   expenseDate: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD")
@@ -148,6 +180,11 @@ expensesRouter.post("/", async (c) => {
     return c.json({ error: "Invalid input", details: parsed.error.format() }, 400);
   }
 
+  // Verify category belongs to this user
+  if (!(await assertOwnedCategory(userId, parsed.data.categoryId))) {
+    return c.json({ error: "Invalid category" }, 400);
+  }
+
   // Get user details for currency & budget check
   const user = await db
     .select()
@@ -156,11 +193,19 @@ expensesRouter.post("/", async (c) => {
     .then((r) => r[0]);
 
   const currency = parsed.data.currency || user?.currency || "EGP";
-  const encryptedDescription = encryptText(parsed.data.description, userId);
+
+  // Pre-generate UUID so AAD cryptographically binds (userId, recordId, field)
+  const expenseId = crypto.randomUUID();
+  const encryptedDescription = encryptField(parsed.data.description, {
+    userId,
+    recordId: expenseId,
+    field: "description",
+  });
 
   const [created] = await db
     .insert(expenses)
     .values({
+      id: expenseId,
       userId,
       amount: parsed.data.amount.toFixed(2),
       description: encryptedDescription,
@@ -224,10 +269,10 @@ expensesRouter.post("/", async (c) => {
 
 // ─── PATCH /api/expenses/:id (Update an expense) ──────────────────────────────
 const updateExpenseSchema = z.object({
-  amount: z.number().positive().optional(),
-  description: z.string().min(1).max(255).optional(),
+  amount: z.number().finite().positive().max(MAX_AMOUNT).optional(),
+  description: z.string().trim().min(1).max(255).optional(),
   categoryId: z.string().uuid().optional().nullable(),
-  currency: z.string().min(1).max(10).optional(),
+  currency: z.string().trim().min(1).max(10).optional(),
   expenseDate: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Must be YYYY-MM-DD")
@@ -237,6 +282,10 @@ const updateExpenseSchema = z.object({
 expensesRouter.patch("/:id", async (c) => {
   const userId = c.get("userId");
   const id = c.req.param("id");
+  if (!UUID_REGEX.test(id)) {
+    return c.json({ error: "Invalid expense ID" }, 400);
+  }
+
   const body = await c.req.json();
   const parsed = updateExpenseSchema.safeParse(body);
 
@@ -244,12 +293,23 @@ expensesRouter.patch("/:id", async (c) => {
     return c.json({ error: "Invalid input", details: parsed.error.format() }, 400);
   }
 
+  if (
+    parsed.data.categoryId !== undefined &&
+    !(await assertOwnedCategory(userId, parsed.data.categoryId))
+  ) {
+    return c.json({ error: "Invalid category" }, 400);
+  }
+
   const updateData: Partial<typeof expenses.$inferInsert> = {};
   if (parsed.data.amount !== undefined) {
     updateData.amount = parsed.data.amount.toFixed(2);
   }
   if (parsed.data.description !== undefined) {
-    updateData.description = encryptText(parsed.data.description, userId);
+    updateData.description = encryptField(parsed.data.description, {
+      userId,
+      recordId: id,
+      field: "description",
+    });
   }
   if (parsed.data.categoryId !== undefined) {
     updateData.categoryId = parsed.data.categoryId;
@@ -275,7 +335,12 @@ expensesRouter.patch("/:id", async (c) => {
     expense: {
       ...updated,
       description:
-        parsed.data.description ?? decryptText(updated.description, userId),
+        parsed.data.description ??
+        decryptField(updated.description, {
+          userId,
+          recordId: updated.id,
+          field: "description",
+        }),
     },
   });
 });
@@ -284,11 +349,14 @@ expensesRouter.patch("/:id", async (c) => {
 expensesRouter.delete("/:id", async (c) => {
   const userId = c.get("userId");
   const id = c.req.param("id");
+  if (!UUID_REGEX.test(id)) {
+    return c.json({ error: "Invalid expense ID" }, 400);
+  }
 
   const [deleted] = await db
     .delete(expenses)
     .where(and(eq(expenses.id, id), eq(expenses.userId, userId)))
-    .returning();
+    .returning({ id: expenses.id });
 
   if (!deleted) {
     return c.json({ error: "Expense not found or unauthorized" }, 404);
