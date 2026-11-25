@@ -22,7 +22,11 @@ const cleanup = async () => {
   console.log("\n\n🛑 Stopping local dev bot...");
   await bot.stop();
   console.log("\n💡 To switch back to your production Vercel deployment, run:");
-  console.log("   npm run webhook:set https://masareefy-chi.vercel.app\n");
+  const prodUrl =
+    process.env.WEBHOOK_URL?.replace("/api/webhook", "") ||
+    process.env.MINI_APP_URL ||
+    "https://<your-app>.vercel.app";
+  console.log(`   npm run webhook:set ${prodUrl}\n`);
   process.exit(0);
 };
 

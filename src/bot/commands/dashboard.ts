@@ -9,17 +9,16 @@ export async function dashboardCommand(ctx: CommandContext<Context>) {
   const env = getEnv();
   const webAppUrl =
     env.MINI_APP_URL ||
-    (env.WEBHOOK_URL ? env.WEBHOOK_URL.replace("/api/webhook", "") : "") ||
-    "https://masareefy-chi.vercel.app";
+    (env.WEBHOOK_URL ? env.WEBHOOK_URL.replace("/api/webhook", "") : "");
 
   const keyboard = new InlineKeyboard();
 
   if (webAppUrl && webAppUrl.startsWith("https://")) {
     keyboard.webApp("📈 فتح لوحة التحكم | Open Dashboard", webAppUrl);
-  } else {
+  } else if (ctx.me?.username) {
     keyboard.url(
       "📈 فتح البوت | Open Bot",
-      "https://t.me/Masareefyy_bot"
+      `https://t.me/${ctx.me.username}`
     );
   }
 

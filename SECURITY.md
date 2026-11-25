@@ -40,19 +40,19 @@ Never commit secrets to git. All production secrets live exclusively in **Vercel
 6. Confirm `Failed=0`, test reading old & new records, then remove `ENCRYPTION_KEY_K1` from Vercel and `.env.local`.
 
 ### B. Revoking a Compromised Telegram Bot Token
-1. Open `@BotFather` on Telegram → `/mybots` → select `@Masareefyy_bot` → **API Token** → **Revoke current token**.
+1. Open `@BotFather` on Telegram → `/mybots` → select your bot → **API Token** → **Revoke current token**.
 2. Update `TELEGRAM_BOT_TOKEN` in Vercel Environment Variables and `.env.local`.
 3. Redeploy Vercel.
 4. Re-register the webhook with your secret token:
    ```bash
-   npm run webhook:set https://masareefy-chi.vercel.app
+   npm run webhook:set https://<your-project>.vercel.app
    ```
 *(Because `ENCRYPTION_KEY` is separate from `TELEGRAM_BOT_TOKEN`, revoking the bot token does NOT affect stored encrypted expenses.)*
 
 ### C. Rotating the Webhook Secret Token
 1. Generate a new token: `openssl rand -hex 32`.
 2. Update `WEBHOOK_SECRET_TOKEN` in Vercel and `.env.local`, and redeploy.
-3. Run `npm run webhook:set https://masareefy-chi.vercel.app` so Telegram sends the new `X-Telegram-Bot-Api-Secret-Token` header.
+3. Run `npm run webhook:set https://<your-project>.vercel.app` so Telegram sends the new `X-Telegram-Bot-Api-Secret-Token` header.
 
 ### D. Breach Notification & Shutdown Policy
 - **Breach:** Rotate affected keys/tokens immediately, inspect Vercel Runtime Logs for unauthorized access patterns (`[Auth]` / `[Webhook]` rejections), and notify users via Telegram broadcast if personal data was exposed.
