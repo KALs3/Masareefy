@@ -32,7 +32,7 @@ flowchart TD
     end
 
     subgraph Vercel["⚡ Vercel Serverless Infrastructure"]
-        Gateway["Hono API Gateway\n(/api/[[...route]])"]
+        Gateway["Hono API Gateway (/api)"]
         
         subgraph BotService["Bot Service (grammY)"]
             Dedup["Deduplication Cache\n(update_id & 55s timeout)"]
